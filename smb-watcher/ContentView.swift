@@ -5,6 +5,7 @@ import AppKit
 struct ContentView: View {
     @State private var status = "Not connected"
     @State private var fileCount = 0
+    @State private var previousFileCount: Int? = nil
     @State private var timer: Timer?
     @State private var selectedFolderPath = "No folder selected"
     @AppStorage("serverURL") private var serverURL = ""
@@ -50,12 +51,20 @@ struct ContentView: View {
             Button("Quit") {
                 NSApplication.shared.terminate(nil)
             }
+            
+            //Button("Test Notification") {
+            //    ServerManager.shared.sendNotification(
+            //        title: "Test Notification",
+            //        body: "If you see this, notifications are working!"
+            //    )
+            //}
         }
         .padding()
         .frame(width: 280)
         .onAppear {
             requestNotificationPermission()
             loadSavedFolder()
+            loadPreviousFileCount()
             if selectedFolderPath != "No folder selected" {
                 startPeriodicChecks()
             }
@@ -73,28 +82,28 @@ struct ContentView: View {
         panel.message = "Select the network folder to monitor"
         panel.prompt = "Select"
         
-        // Allow network locations
         panel.treatsFilePackagesAsDirectories = false
         panel.canChooseDirectories = true
         
         panel.begin { response in
             if response == .OK, let url = panel.url {
                 do {
-                    // Create security-scoped bookmark
                     let bookmarkData = try url.bookmarkData(
                         options: .withSecurityScope,
                         includingResourceValuesForKeys: nil,
                         relativeTo: nil
                     )
                     
-                    // Save bookmark
                     UserDefaults.standard.set(bookmarkData, forKey: "folderBookmark")
                     UserDefaults.standard.set(url.path, forKey: "folderPath")
                     
                     self.selectedFolderPath = url.path
                     print("[ContentView] Folder selected and bookmark saved: \(url.path)")
                     
-                    // Start monitoring
+                    // Reset previous count when selecting new folder
+                    self.previousFileCount = nil
+                    UserDefaults.standard.removeObject(forKey: "previousFileCount")
+                    
                     startPeriodicChecks()
                     
                 } catch {
@@ -109,6 +118,13 @@ struct ContentView: View {
         if let path = UserDefaults.standard.string(forKey: "folderPath") {
             selectedFolderPath = path
             print("[ContentView] Loaded saved folder path: \(path)")
+        }
+    }
+    
+    func loadPreviousFileCount() {
+        if UserDefaults.standard.object(forKey: "previousFileCount") != nil {
+            previousFileCount = UserDefaults.standard.integer(forKey: "previousFileCount")
+            print("[ContentView] Loaded previous file count: \(previousFileCount ?? 0)")
         }
     }
     
@@ -143,29 +159,56 @@ struct ContentView: View {
                 self.fileCount = count
                 self.status = "Connected ✓"
                 print("[ContentView] ✓ Check successful: \(count) files")
-                ServerManager.shared.sendNotification(title: "Server Check", body: "Found \(count) files")
+                
+                // Check if file count increased
+                if let previous = self.previousFileCount {
+                    if count > previous {
+                        let increase = count - previous
+                        print("[ContentView] 📈 File count increased by \(increase) - SENDING NOTIFICATION")
+                        ServerManager.shared.sendNotification(
+                            title: "New Files Detected! 📁",
+                            body: "File count increased from \(previous) to \(count) (+\(increase) files)",
+                            folderPath: self.selectedFolderPath  // Add this parameter
+                        )
+                    } else if count < previous {
+                        print("[ContentView] 📉 File count decreased by \(previous - count) (from \(previous) to \(count))")
+                    } else {
+                        print("[ContentView] File count unchanged: \(count)")
+                    }
+                } else {
+                    print("[ContentView] First check - baseline set to \(count) files")
+                }
+                
+                // Save current count as previous for next check
+                self.previousFileCount = count
+                UserDefaults.standard.set(count, forKey: "previousFileCount")
                 
             case .failure(let error):
                 self.status = "Error"
                 print("[ContentView] ✗ Check failed: \(error.localizedDescription)")
-                ServerManager.shared.sendNotification(title: "Server Error", body: error.localizedDescription)
+                ServerManager.shared.sendNotification(
+                    title: "Server Error",
+                    body: error.localizedDescription,
+                    folderPath: nil  // No folder path for errors
+                )
             }
         }
     }
     
     func requestNotificationPermission() {
+        // Set the delegate
+        UNUserNotificationCenter.current().delegate = NotificationDelegate.shared
+        
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
             if granted {
                 print("[ContentView] Notification permission granted")
+            } else if let error = error {
+                print("[ContentView] Notification permission denied: \(error)")
             }
         }
     }
     
     func openSettings() {
-        let settingsView = SettingsView()
-        let hostingController = NSHostingController(rootView: settingsView)
-        let window = NSWindow(contentViewController: hostingController)
-        window.title = "Settings"
-        window.makeKeyAndOrderFront(nil)
+        SettingsWindowManager.shared.open()
     }
 }

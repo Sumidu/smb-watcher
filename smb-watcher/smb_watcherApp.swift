@@ -10,7 +10,7 @@ import SwiftUI
 @main
 struct smb_watcherApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    
+
     var body: some Scene {
         Settings {
             EmptyView()
@@ -20,7 +20,25 @@ struct smb_watcherApp: App {
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
-    var popover = NSPopover()
+       var popover = NSPopover()
+       var settingsWindow: NSWindow?
+    
+    func openSettings() {
+            if settingsWindow == nil {
+                let settingsView = SettingsView()
+                let hostingController = NSHostingController(rootView: settingsView)
+                let window = NSWindow(contentViewController: hostingController)
+                window.title = "Settings"
+                window.styleMask = [.titled, .closable]
+                window.center()
+                window.delegate = self
+                
+                self.settingsWindow = window
+            }
+            
+            NSApp.activate(ignoringOtherApps: true)
+            settingsWindow?.makeKeyAndOrderFront(nil)
+        }
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Create menu bar item
@@ -43,6 +61,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if let button = statusItem?.button {
                 popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             }
+        }
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        if notification.object as? NSWindow == settingsWindow {
+            settingsWindow = nil
         }
     }
 }
